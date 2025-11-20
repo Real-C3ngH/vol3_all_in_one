@@ -3,7 +3,7 @@ import random
 import sys
 import re
 import os
-from multiprocessing import Pool, cpu_count
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 VOL3_PLUGINS_PATH = "/Users/c3ngh/Tools/volatility3/volatility3/plugins"
 VOL3_PATH = "/Users/c3ngh/Tools/volatility3/vol.py"
@@ -12,18 +12,31 @@ def random_emoji():
 
     return random.choice(['🎉', '🚀', '🚩', '💥', '🔥', '💭', '🎯', '🤗', '💖'])
 
-def run_vol3_command(args):
+def run_vol3_command(key, value, image_path, dir_path):
+    print(f"{random_emoji()} 当前进行的任务为: {key}")
 
-    key, value, image_path, VOL3_PLUGINS_PATH, dir_path = args
-    print(f"{random_emoji()} 当前进行的任务为:{key}")
+    out_file = os.path.join(dir_path, f"{value}.txt")
+    cmd = [
+        "python3",
+        VOL3_PATH,
+        "-p", VOL3_PLUGINS_PATH,
+        "-f", image_path,
+        value
+    ]
 
     try:
-        command = f'python3 {VOL3_PATH} -p {VOL3_PLUGINS_PATH} -f {image_path} {value} > {dir_path}/{value}.txt'
-        subprocess.run(command, shell=True, stderr=subprocess.PIPE, universal_newlines=True)
-        print(f"✅ vol3: {key}已执行完成")
+        with open(out_file, "w", encoding="utf-8", errors="ignore") as f:
+            subprocess.run(
+                cmd,
+                stdout=f,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False
+            )
+        print(f"✅ vol3: {key} 已执行完成")
 
     except Exception as e:
-        print(f"😭 vol3: {key}任务执行出现了一点问题, Error: {e}")
+        print(f"😭 vol3: {key} 任务执行出现了一点问题, Error: {e}")
 
 def vol3_confirm_profile():
 
@@ -289,21 +302,36 @@ if __name__ == "__main__":
 
     if not system:
         sys.exit("😢 无法确定系统类型，退出分析...")
-        
-    print(f"✅ 已确认系统版本，自动开始分析...")
 
-    num_cores = cpu_count()
+    print("✅ 已确认系统版本，自动开始分析...")
+
     plugins_to_use = {
         'windows': windows_plugins,
         'linux': linux_plugins,
         'mac': mac_plugins
     }.get(system)
-    
-    print(f"🔍 正在使用{num_cores}核心多线程分析...")
 
-    with Pool(processes=num_cores) as p:
-        args_list = [(key, value, image_path, VOL3_PLUGINS_PATH, dir_path) 
-                    for key, value in plugins_to_use.items()]
-        p.map(run_vol3_command, args_list)
+    if not plugins_to_use:
+        sys.exit("😢 未找到对应系统的插件配置，退出分析...")
+
+    tasks = list(plugins_to_use.items())
+    num_tasks = len(tasks)
+
+    max_workers = min(os.cpu_count(), num_tasks)
+
+    print(f"🔍 正在使用 {max_workers} 个并发任务分析，共 {num_tasks} 个插件...")
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_key = {
+            executor.submit(run_vol3_command, key, value, image_path, dir_path): key
+            for key, value in tasks
+        }
+
+        for future in as_completed(future_to_key):
+            key = future_to_key[future]
+            try:
+                future.result()
+            except Exception as e:
+                print(f"🤕 插件 {key} 执行时抛出了未捕获异常: {e}")
 
     print(f"🎊 所有任务执行完成！结果保存在 {dir_path} 目录下")
