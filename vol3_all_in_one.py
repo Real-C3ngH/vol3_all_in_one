@@ -1,27 +1,30 @@
 import subprocess
-import random
 import sys
 import re
 import os
+import time
+import argparse
+import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-VOL3_PLUGINS_PATH = "/Users/c3ngh/Tools/volatility3/volatility3/plugins"
-VOL3_PATH = "/Users/c3ngh/Tools/volatility3/vol.py"
+VOL3_PLUGINS_PATH = "/Users/c3ngh/工具/Misc/volatility3/plugins"
+VOL3_PATH = "/Users/c3ngh/工具/Misc/volatility3/vol.py"
+
 
 def random_emoji():
+    return random.choice(["🎉", "🚀", "🚩", "💥", "🔥", "💭", "🎯", "🤗", "💖"])
 
-    return random.choice(['🎉', '🚀', '🚩', '💥', '🔥', '💭', '🎯', '🤗', '💖'])
 
-def run_vol3_command(key, value, image_path, dir_path):
-    print(f"{random_emoji()} 当前进行的任务为: {key}")
-
+def run_vol3_command(key, value, image_path, dir_path, timeout=1200):
     out_file = os.path.join(dir_path, f"{value}.txt")
     cmd = [
         "python3",
         VOL3_PATH,
-        "-p", VOL3_PLUGINS_PATH,
-        "-f", image_path,
-        value
+        "-p",
+        VOL3_PLUGINS_PATH,
+        "-f",
+        image_path,
+        value,
     ]
 
     try:
@@ -31,22 +34,23 @@ def run_vol3_command(key, value, image_path, dir_path):
                 stdout=f,
                 stderr=subprocess.PIPE,
                 text=True,
-                check=False
+                check=False,
+                timeout=timeout,
             )
-        print(f"✅ vol3: {key} 已执行完成")
+        return "ok", key, value, None
+
+    except subprocess.TimeoutExpired:
+        return "timeout", key, value, f"执行超过 {timeout} 秒，已终止"
 
     except Exception as e:
-        print(f"😭 vol3: {key} 任务执行出现了一点问题, Error: {e}")
+        return "error", key, value, f"{type(e).__name__}: {e}"
 
-def vol3_confirm_profile():
 
+def vol3_confirm_profile(image_path):
     try:
-        cmd = f'python3 {VOL3_PATH} -f {image_path} windows.info'
+        cmd = f'python3 {VOL3_PATH} -f "{image_path}" windows.info'
         out = subprocess.check_output(
-            cmd,
-            shell=True,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True
+            cmd, shell=True, stderr=subprocess.STDOUT, universal_newlines=True
         )
 
         nt_major = re.search(r"NtMajorVersion\s+(\d+)", out)
@@ -78,67 +82,67 @@ def vol3_confirm_profile():
             if system_root:
                 pretty += f" @ {system_root.group(1).strip()}"
 
-            print(f"🌟 该内存镜像检测为：{pretty}")
+            print(f"{random_emoji()} 检测到系统：{pretty}")
             return "windows"
 
     except subprocess.CalledProcessError:
         pass
 
     try:
-        cmd = f'python3 {VOL3_PATH} -f {image_path} banners.Banners'
+        cmd = f'python3 {VOL3_PATH} -f "{image_path}" banners.Banners'
         out = subprocess.check_output(
-            cmd,
-            shell=True,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True
+            cmd, shell=True, stderr=subprocess.STDOUT, universal_newlines=True
         )
 
         m_linux = re.search(r"Linux version\s+(.+)", out)
         if m_linux:
             banner = m_linux.group(1).strip()
-            print(f"🌟 该内存镜像检测为：Linux\n   ➜ 内核 banner: {banner}")
+            print(f"{random_emoji()} 检测到系统：Linux")
+            print(f"   内核 banner：{banner}")
             return "linux"
 
         m_darwin = re.search(r"Darwin Kernel Version\s+([^\s]+)", out)
         if m_darwin:
             darwin_ver = m_darwin.group(1)
-            print(f"🌟 该内存镜像检测为：macOS (Darwin Kernel {darwin_ver})")
+            print(f"{random_emoji()} 检测到系统：macOS（Darwin Kernel {darwin_ver}）")
             return "mac"
 
     except subprocess.CalledProcessError:
         pass
 
     try:
-        strings_cmd = f"strings {image_path}"
+        strings_cmd = f'strings "{image_path}"'
         strings_out = subprocess.check_output(
             strings_cmd,
             shell=True,
             stderr=subprocess.STDOUT,
             universal_newlines=True,
-            errors="ignore"
+            errors="ignore",
         )
 
         m_linux = re.search(r"Linux version\s+(.+)", strings_out)
         if m_linux:
             banner = m_linux.group(1).strip()
-            print(f"🌟 该内存镜像通过strings可能识别为 Linux\n   ➜ 内核 banner: {banner}")
+            print(f"{random_emoji()} 通过 strings 识别为 Linux")
+            print(f"   内核 banner：{banner}")
             return "linux"
 
         m_darwin = re.search(r"Darwin Kernel Version\s+([^\s]+)", strings_out)
         if m_darwin:
-            print(f"🌟 该内存镜像通过strings可能识别为 macOS (Darwin Kernel {m_darwin.group(1)})")
+            print(
+                f"{random_emoji()} 通过 strings 识别为 macOS "
+                f"（Darwin Kernel {m_darwin.group(1)}）"
+            )
             return "mac"
 
-
         if re.search(r"NtSystemRoot\\?\\Windows", strings_out, re.IGNORECASE):
-            print("🌟 该内存镜像通过strings可能识别为 Windows")
+            print(f"{random_emoji()} 通过 strings 识别为 Windows")
             return "windows"
 
     except subprocess.CalledProcessError:
         pass
 
-    # 全部失败
-    print("😢 无法可靠识别系统类型，请检查符号表或手工确认一次～")
+    print("⚠️ 无法识别系统类型")
     return None
 
 
@@ -212,11 +216,11 @@ windows_plugins = {
     "崩溃信息": "windows.crashinfo.Crashinfo",
     "权限提升检测": "windows.skeleton_key_check.Skeleton_Key_Check",
     "进程VAD映射": "windows.virtmap.VirtMap",
-    #"驱动文件转储": "windows.dumpfiles.DumpFiles", 这个会在同目录下生成一大堆文件，所以默认注释
     "系统版本信息": "windows.verinfo.VerInfo",
     "大块内存池分析": "windows.bigpools.BigPools",
     "提取凭据缓存": "windows.cachedump.Cachedump",
-    "恶意代码检测": "windows.malfind.Malfind"
+    "恶意代码检测": "windows.malfind.Malfind",
+    #"驱动文件转储": "windows.dumpfiles.DumpFiles" 这个会在同目录下生成一大堆文件，所以默认注释
 }
 
 linux_plugins = {
@@ -257,7 +261,7 @@ linux_plugins = {
     "进程树": "linux.pstree.PsTree",
     "进程调试跟踪": "linux.ptrace.Ptrace",
     "套接字状态": "linux.sockstat.Sockstat",
-    "TTY 终端检查": "linux.tty_check.tty_check"
+    "TTY 终端检查": "linux.tty_check.tty_check",
 }
 
 mac_plugins = {
@@ -283,55 +287,144 @@ mac_plugins = {
     "套接字过滤器": "mac.socket_filters.Socket_filters",
     "定时器信息": "mac.timers.Timers",
     "TrustedBSD 安全策略": "mac.trustedbsd.Trustedbsd",
-    "文件系统事件": "mac.vfsevents.VFSevents"
+    "文件系统事件": "mac.vfsevents.VFSevents",
 }
 
-try:
-    image_path = sys.argv[1]
-    image_name = image_path.split('/')[-1]
 
-except IndexError:
-    sys.exit("😢 请输入待分析的内存镜像的路径...")
+def parse_args():
+    parser = argparse.ArgumentParser(description="Volatility 3 全插件自动化脚本 by C3ngH")
+    parser.add_argument("image", help="待分析的内存镜像路径")
+    parser.add_argument(
+        "-full",
+        dest="full",
+        action="store_true",
+        help="输出详细插件执行日志",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=1200,
+        help="单个插件最大执行时间（秒），默认 1200",
+    )
+    return parser.parse_args()
 
-dir_path = image_path.replace(image_name, "vol_output")
-os.makedirs(dir_path, exist_ok=True)
 
 if __name__ == "__main__":
+    args = parse_args()
+    image_path = os.path.abspath(args.image)
+    full_output = args.full
+    per_plugin_timeout = args.timeout
 
-    system = vol3_confirm_profile()
+    if not os.path.exists(image_path):
+        sys.exit(f"❌ 镜像文件不存在：{image_path}")
 
+    image_name = os.path.basename(image_path)
+    dir_path = image_path.replace(image_name, "vol_output")
+    os.makedirs(dir_path, exist_ok=True)
+
+    print(f"{random_emoji()} 镜像路径：{image_path}")
+    print(f"{random_emoji()} 输出目录：{dir_path}")
+
+    system = vol3_confirm_profile(image_path)
     if not system:
-        sys.exit("😢 无法确定系统类型，退出分析...")
+        sys.exit("❌ 无法确定系统类型，已终止。")
 
-    print("✅ 已确认系统版本，自动开始分析...")
+    print(f"{random_emoji()} 系统类型确认完成，即将开始分析。")
 
     plugins_to_use = {
-        'windows': windows_plugins,
-        'linux': linux_plugins,
-        'mac': mac_plugins
+        "windows": windows_plugins,
+        "linux": linux_plugins,
+        "mac": mac_plugins,
     }.get(system)
 
     if not plugins_to_use:
-        sys.exit("😢 未找到对应系统的插件配置，退出分析...")
+        sys.exit("❌ 未找到对应系统的插件配置，已终止。")
 
     tasks = list(plugins_to_use.items())
     num_tasks = len(tasks)
+    max_workers = min(os.cpu_count() or 4, num_tasks)
 
-    max_workers = min(os.cpu_count(), num_tasks)
+    mode_str = "详细输出模式" if full_output else "精简进度模式"
+    print(
+        f"{random_emoji()} 当前系统：{system}，插件数量：{num_tasks}，"
+        f"并发线程：{max_workers}，输出模式：{mode_str}"
+    )
+    print("🚀 开始执行插件分析。\n")
 
-    print(f"🔍 正在使用 {max_workers} 个并发任务分析，共 {num_tasks} 个插件...")
+    start_time = time.time()
+
+    success_count = 0
+    timeout_count = 0
+    error_count = 0
+    failed_plugins = []
+
+    progress_interval = 2.0
+    last_progress_print = 0.0
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_key = {
-            executor.submit(run_vol3_command, key, value, image_path, dir_path): key
+        futures = [
+            executor.submit(
+                run_vol3_command, key, value, image_path, dir_path, per_plugin_timeout
+            )
             for key, value in tasks
-        }
+        ]
 
-        for future in as_completed(future_to_key):
-            key = future_to_key[future]
-            try:
-                future.result()
-            except Exception as e:
-                print(f"🤕 插件 {key} 执行时抛出了未捕获异常: {e}")
+        done = 0
+        total = len(futures)
 
-    print(f"🎊 所有任务执行完成！结果保存在 {dir_path} 目录下")
+        try:
+            for future in as_completed(futures):
+                status, key, plugin_name, msg = future.result()
+                done += 1
+
+                if status == "ok":
+                    success_count += 1
+                    if full_output:
+                        print(f"{random_emoji()} 已完成：{key}（{plugin_name}）")
+                elif status == "timeout":
+                    timeout_count += 1
+                    failed_plugins.append((key, plugin_name, status, msg))
+                    if full_output:
+                        print(f"⏰ 超时：{key}（{plugin_name}） - {msg}")
+                else:
+                    error_count += 1
+                    failed_plugins.append((key, plugin_name, status, msg))
+                    if full_output:
+                        print(f"⚠️ 出错：{key}（{plugin_name}） - {msg}")
+
+                if not full_output:
+                    now = time.time()
+                    if (now - last_progress_print >= progress_interval) or done == total:
+                        last_progress_print = now
+                        percent = done * 100.0 / total
+                        bar_width = 30
+                        filled = int(bar_width * percent / 100.0)
+                        bar = "█" * filled + "·" * (bar_width - filled)
+                        print(
+                            f"\r{random_emoji()} 进度 {done}/{total} "
+                            f"({percent:5.1f}%) [{bar}]",
+                            end="",
+                            flush=True,
+                        )
+
+        except KeyboardInterrupt:
+            print("\n⚠️ 正在中止剩余任务")
+
+    end_time = time.time()
+    elapsed = end_time - start_time
+    if not full_output:
+        print()
+
+    print(f"\n{random_emoji()} 分析任务结束。")
+    print(f"⏱ 总耗时：{elapsed:.1f} 秒")
+    print(f"✅ 成功：{success_count}")
+    print(f"⏰ 超时：{timeout_count}")
+    print(f"⚠️ 错误：{error_count}")
+
+    if failed_plugins:
+        print("\n📌 以下插件执行异常：")
+        for key, plugin_name, status, msg in failed_plugins:
+            label = "超时" if status == "timeout" else "错误"
+            print(f"  - {label}：{key}（{plugin_name}） - {msg}")
+
+    print(f"\n{random_emoji()} 所有输出已保存到：{dir_path}")
