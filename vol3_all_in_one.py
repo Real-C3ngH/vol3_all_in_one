@@ -27,28 +27,107 @@ def run_vol3_command(args):
 
 def vol3_confirm_profile():
 
-    system_info = {'windows': 'windows.info', 'linux': 'banners.Banners', 'mac': 'banners.Banners'}
-    pattern_map = {
-        'windows': r"PE MajorOperatingSystemVersion\s+(\d+)",
-        'linux': r"Linux version\s+(\d+)",
-        'mac': r"Mac version\s+(\d+)"
-    }
-    
-    for system, plugin in system_info.items():
+    try:
+        cmd = f'python3 {VOL3_PATH} -f {image_path} windows.info'
+        out = subprocess.check_output(
+            cmd,
+            shell=True,
+            stderr=subprocess.STDOUT,
+            universal_newlines=True
+        )
 
-        try:
-            vol3_profile_command = f'python3 {VOL3_PATH} -f {image_path} {plugin}'
-            vol3_res = subprocess.check_output(vol3_profile_command, shell=True, stderr=subprocess.PIPE, universal_newlines=True)
-            vol3_profiles = re.findall(pattern_map[system], vol3_res)
+        nt_major = re.search(r"NtMajorVersion\s+(\d+)", out)
+        nt_minor = re.search(r"NtMinorVersion\s+(\d+)", out)
+        is_64 = re.search(r"Is64Bit\s+(True|False)", out)
+        build_lab = re.search(r"NTBuildLab\s+(.+)", out)
+        system_root = re.search(r"NtSystemRoot\s+(.+)", out)
 
-            if vol3_profiles:
-                print(f"🌟 该内存镜像可能的版本为：{system} {vol3_profiles[0]}")
-                return system
-            
-        except subprocess.CalledProcessError:
-            continue
-    
+        if nt_major and nt_minor:
+            major = int(nt_major.group(1))
+            minor = int(nt_minor.group(1))
+            arch = "x64" if is_64 and is_64.group(1) == "True" else "x86"
+            version_str = f"{major}.{minor}"
+
+            win_name_map = {
+                (5, 1): "Windows XP",
+                (5, 2): "Windows Server 2003",
+                (6, 0): "Windows Vista / Server 2008",
+                (6, 1): "Windows 7 / Server 2008 R2",
+                (6, 2): "Windows 8 / Server 2012",
+                (6, 3): "Windows 8.1 / Server 2012 R2",
+                (10, 0): "Windows 10 / 11 / Server 2016+",
+            }
+            pretty_name = win_name_map.get((major, minor), f"Windows {version_str}")
+
+            pretty = f"{pretty_name} {arch}"
+            if build_lab:
+                pretty += f" [{build_lab.group(1).strip()}]"
+            if system_root:
+                pretty += f" @ {system_root.group(1).strip()}"
+
+            print(f"🌟 该内存镜像检测为：{pretty}")
+            return "windows"
+
+    except subprocess.CalledProcessError:
+        pass
+
+    try:
+        cmd = f'python3 {VOL3_PATH} -f {image_path} banners.Banners'
+        out = subprocess.check_output(
+            cmd,
+            shell=True,
+            stderr=subprocess.STDOUT,
+            universal_newlines=True
+        )
+
+        m_linux = re.search(r"Linux version\s+(.+)", out)
+        if m_linux:
+            banner = m_linux.group(1).strip()
+            print(f"🌟 该内存镜像检测为：Linux\n   ➜ 内核 banner: {banner}")
+            return "linux"
+
+        m_darwin = re.search(r"Darwin Kernel Version\s+([^\s]+)", out)
+        if m_darwin:
+            darwin_ver = m_darwin.group(1)
+            print(f"🌟 该内存镜像检测为：macOS (Darwin Kernel {darwin_ver})")
+            return "mac"
+
+    except subprocess.CalledProcessError:
+        pass
+
+    try:
+        strings_cmd = f"strings {image_path}"
+        strings_out = subprocess.check_output(
+            strings_cmd,
+            shell=True,
+            stderr=subprocess.STDOUT,
+            universal_newlines=True,
+            errors="ignore"
+        )
+
+        m_linux = re.search(r"Linux version\s+(.+)", strings_out)
+        if m_linux:
+            banner = m_linux.group(1).strip()
+            print(f"🌟 该内存镜像通过strings可能识别为 Linux\n   ➜ 内核 banner: {banner}")
+            return "linux"
+
+        m_darwin = re.search(r"Darwin Kernel Version\s+([^\s]+)", strings_out)
+        if m_darwin:
+            print(f"🌟 该内存镜像通过strings可能识别为 macOS (Darwin Kernel {m_darwin.group(1)})")
+            return "mac"
+
+
+        if re.search(r"NtSystemRoot\\?\\Windows", strings_out, re.IGNORECASE):
+            print("🌟 该内存镜像通过strings可能识别为 Windows")
+            return "windows"
+
+    except subprocess.CalledProcessError:
+        pass
+
+    # 全部失败
+    print("😢 无法可靠识别系统类型，请检查符号表或手工确认一次～")
     return None
+
 
 windows_plugins = {
     "列出所有进程": "windows.pslist.PsList",
